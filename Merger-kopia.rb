@@ -40,7 +40,7 @@ class Merger
         
         
         newWorker=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
-        newWorker.publish("Requesting signup, id: "+@customerID,:persistent=>true,:headers=>{
+        newWorker.publish("Requesting signup, id: "+@workerID,:persistent=>true,:headers=>{
         :workerID=>@workerID})
         
         noMessage=true
@@ -48,9 +48,9 @@ class Merger
         puts "Awaiting Task..."
 
         
-        @replyToQueue=@channel2.queue(customerID,:durable => true, :auto_delete => true)
-            puts "Connected to replyQueue: "+customerID 
-        @currentTaskQueue=@channel3.queue("CurrentTaskQueue",:durable => true)
+        #@replyToQueue=@channel2.queue(worker,:durable => true, :auto_delete => true)
+        #    puts "Connected to replyQueue: "+customerID 
+        @currentTaskQueue=@channel3.queue("CurrentTaskQueue",:durable => true, :auto_delete => true)
             puts "Connected to CurrentTaskQueue: "+taskID  
         # currentTaskQueue=@currentTaskQueue
             self.merge()
@@ -58,7 +58,7 @@ class Merger
     end
 
    
-    end
+    
 
 
     def start
@@ -74,8 +74,8 @@ class Merger
             @channel2  = @conn.create_channel
             @channel3  = @conn.create_channel
             #@channel3.prefetch(1)
-            @replyToQueue=@channel2.queue(customerID,:durable => true, :auto_delete => true)
-            puts "Connected to replyQueue: "+customerID 
+            #@replyToQueue=@channel2.queue(customerID,:durable => true, :auto_delete => true)
+            #puts "Connected to replyQueue: "+customerID 
             @currentTaskQueue=@channel3.queue(taskID,:durable => true)
             puts "Connected to currentTaskQueue: "+taskID  
 

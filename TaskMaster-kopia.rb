@@ -52,7 +52,7 @@ class TaskManager
 
         @channel2.prefetch(1)
         #@taskExchange=@channel.fanout("TaskExchange")
-        @newTaskQueue=@channel2.queue("NewTaskQueue",:durable => true, :auto_delete => true)
+        @newTaskQueue=@channel2.queue("NewTaskQueue",:durable => true)
         @newWorkerQueue=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
         @workerResponseQueue=@channel.queue("workerResponseQueue",:durable => true, :auto_delete => true)
     end
@@ -139,9 +139,15 @@ class TaskManager
         end
 
         @newWorkerQueue.subscribe() do |delivery_info, properties, payload|
+            puts "Got message: "+payload
+
             worker=Worker.new(@channel,properties.headers["workerID"])
             workerList0.push(worker)
+            puts "New worker registered."
         end
 
     end
-end    
+end
+
+taskMaster=TaskManager.new
+taskMaster.start    

@@ -1,8 +1,8 @@
 require 'bunny'
-
+require "SecureRandom"
 class Client
 
-    attr_accessor
+    attr_accessor 
         :channel
         :conn
         :replayToQueue
@@ -19,7 +19,10 @@ class Client
                 @conn = Bunny.new
                 @conn.start
                 @channel=@conn.create_channel
-                @newTaskQueue==@channel.queue("NewTaskQueue",:durable => true, :auto_delete => true)
+                @newTaskQueue=@channel.queue("NewTaskQueue",:durable => true)
+
+                @mergeQueueName=SecureRandom.hex
+                @replayToQueueName=SecureRandom.hex
                 break
             rescue Exception => e
                 puts "Something went terribly wrong! I couldn't connect, the exception is:"
@@ -70,11 +73,13 @@ class Client
         while true do 
             begin
                 
-                mergeQueue=channel.queue(mergeQueueName,:durable => true)
-                replyToQueue=channel.queue(replayToQueueName,:durable => true, :auto_delete => true)
+                @mergeQueue=@channel.queue(@mergeQueueName,:durable => true,:auto_delete=>true)
+                @replyToQueue=@channel.queue(@replayToQueueName,:durable => true, :auto_delete => true)
+
                 puts "Succesfully Connected!"
-                mergeQueue.purge()
-                replyToQueue.purge()
+
+                @mergeQueue.purge()
+                @replyToQueue.purge()
                 break
             rescue Exception=>e
                 puts "Something went terribly wrong! I couldn't connect, the exception is:"
@@ -136,26 +141,26 @@ class Client
     def sendTask(array)           
         @newTaskQueue.publish("NewTask",:persistent=>true,
             :headers=>{
-            :taskID=>mergeQueue.name,
-            :replyTo=>replyToQueue.name,
+            :taskID=>@mergeQueue.name,
+            :replyTo=>@replyToQueue.name,
             :finalCount=>array.count
-        },:message_id=>mergeQueue.name)
+        },:message_id=>@mergeQueue.name)
 
-        puts "Send taskID: "+mergeQueue.name
+        puts "Send taskID: "+@mergeQueue.name
 
         finalCount=array.count
         for number in array
-            mergeQueue.publish("MergeMessage",:persistent=>true,
+            @mergeQueue.publish("MergeMessage",:persistent=>true,
             :headers=>{
-                    :taskID=>mergeQueue.name,
+                    :taskID=>@mergeQueue.name,
                     
                     :array=>[number],
-                    :finalCount=>array.count},:reply_to=>replyToQueue.name,) 
+                    :finalCount=>array.count},:reply_to=>@replyToQueue.name,) 
         end
 
         puts "Awaiting reply..." 
 
-        replyToQueue.subscribe(:block => true,:exclusive => true,:ack=>true) do |delivery_info, properties, payload|
+        @replyToQueue.subscribe(:block => true,:exclusive => true,:ack=>true) do |delivery_info, properties, payload|
             array=properties.headers["array"]
             puts "Recieved response!"
             puts "Do you want me to output sorted array?"
@@ -193,7 +198,9 @@ class Client
             puts "Finishing task...."
             puts "======================"        
 
-            channel.acknowledge(delivey_info.delivery_tag,false)  
+            @channel.acknowledge(delivey_info.delivery_tag,false)  
        end      
    end
 end
+client=Client.new
+client.start
