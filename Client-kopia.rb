@@ -1,4 +1,4 @@
-require 'Bunny'
+require 'bunny'
 
 class Client
 

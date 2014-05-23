@@ -1,10 +1,9 @@
-require "Bunny"
+require "bunny"
 require "SecureRandom"
 
 
 
 class TaskManager
-
 
     class Worker
         attr_accessor
@@ -38,6 +37,8 @@ class TaskManager
         :currentTaskQueue
         :taskID
         :taskInputQueues
+        #:taskExchange
+
     def initialize
         @conn = Bunny.new
         @conn.start
@@ -50,11 +51,10 @@ class TaskManager
         @workerBussyList=[]
 
         @channel2.prefetch(1)
+        #@taskExchange=@channel.fanout("TaskExchange")
         @newTaskQueue=@channel2.queue("NewTaskQueue",:durable => true, :auto_delete => true)
         @newWorkerQueue=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
         @workerResponseQueue=@channel.queue("workerResponseQueue",:durable => true, :auto_delete => true)
-        
-        #@currentTaskQueue=@channel.queue(SecureRandom.hex,:durable => true, :auto_delete => true)
     end
 
     def binarySearch(value,workerList)
@@ -73,7 +73,7 @@ class TaskManager
 
         
     def sendArray(array)
-        while true do
+        while true
             worker=binarySearch(worker.currentArrayLength,workerList1)
             workerList1.delete(worker)
             if worker.nil?
@@ -105,7 +105,7 @@ class TaskManager
                 )
 
         end        
-
+    end
 
     def start
 
@@ -114,10 +114,11 @@ class TaskManager
             puts task_payload
             @taskID=task_properties.headers["taskID"]
             @finalCount=task_properties.headers["finalCount"]
-            @currentTaskQueue=@channel.queue(SecureRandom.hex,:durable => true, :auto_delete => true)
+            @currentTaskQueue=@channel.queue("CurrentTaskQueue",:durable => true, :auto_delete => true)
             @taskInputQueue=@channel.queue(@taskID,:durable => true, :auto_delete => true)
             @replayToQueue=@channel.queue(task_properties.reply_to,:durable => true, :auto_delete => true)
-            
+           
+
             @taskInputQueue.subscribe() do |delivery_info, properties, payload|
                 sendArray(properties.headers["array"])
 
@@ -134,12 +135,12 @@ class TaskManager
                 @channel2.acknowledge(task_delivery_info.delivery_tag,false)
             else    
                 sendArray(array)
-
+            end
         end
 
         @newWorkerQueue.subscribe() do |delivery_info, properties, payload|
             worker=Worker.new(@channel,properties.headers["workerID"])
-            workerList.push(worker)
+            workerList0.push(worker)
         end
 
     end
