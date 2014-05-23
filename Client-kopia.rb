@@ -1,4 +1,4 @@
-require 'bunny'
+require 'Bunny'
 
 class Client
 
@@ -8,7 +8,7 @@ class Client
         :replayToQueue
         :mergeQueue
         :newTaskExchange
-        :@newTaskQueue
+        :newTaskQueue
         :finalCount
         :mergeQueueName
         :replayToQueueName
@@ -34,11 +34,7 @@ class Client
                 end    
             end
         end
-    end        
-
-    def getRandomString
-        return (0...50).map { ('a'..'z').to_a[rand(26)] }.join
-    end    
+    end          
 
     def readArrayFromFile(fileName)
         begin
