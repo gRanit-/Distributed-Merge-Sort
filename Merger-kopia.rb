@@ -1,21 +1,5 @@
 require "bunny"
 
-class Array
-  def insertionsort
-    1.upto(length - 1) do |i|
-      value = self[i]
-      j = i - 1
-      while j >= 0 and self[j] > value
-        self[j+1] = self[j]
-        j -= 1
-      end
-      self[j+1] = value
-    end
-    self
-  end
-puts "Sorted"
-end
-
 
 class Merger
     attr_accessor :conn,
@@ -32,7 +16,8 @@ class Merger
     :task_delivery_info,
     :task_properties,
     :task_payload
-     
+
+
     def initialize()
         @conn = Bunny.new
         @conn.start    
@@ -46,7 +31,7 @@ class Merger
         @channel.prefetch(1)
         #@channel3.prefetch(2)
         @taskQueue=@channel.queue("",:durable => true, :auto_delete => true,:exclusive => true)
-                @taskQueue.bind(@newTaskExchange)
+        @taskQueue.bind(@newTaskExchange)
         @taskID=""
         @finalCount=""
         @customerID=(0...50).map { ('a'..'z').to_a[rand(26)] }.join
@@ -55,7 +40,7 @@ class Merger
         
         
         newWorker=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
-        newWorker.publish("Requesting signup,id "+@customerID,:persistent=>true,:headers=>{
+        newWorker.publish("Requesting signup, id: "+@customerID,:persistent=>true,:headers=>{
         :workerID=>@customerID})
         
         noMessage=true
@@ -77,12 +62,18 @@ class Merger
             self.merge()
             puts "Finished Task!"       
     end
-    
+
+    def getRandomString
+        return (0...50).map { ('a'..'z').to_a[rand(26)] }.join
+    end
+
+
     def start
         @taskQueue.subscribe(:block => true,:ack=>false,:exclusive => true) do |task_delivery_info, task_properties, task_payload|
-           @task_delivery_info, @task_properties, @task_payload=task_delivery_info, task_properties, task_payload
+            
+            @task_delivery_info, @task_properties, @task_payload=task_delivery_info, task_properties, task_payload
             puts task_payload
-            @customerID=task_properties.headers["replyTo"]
+            @customerID=task_properties.reply_to
             @taskID=task_properties.headers["taskID"]
             @finalCount=task_properties.headers["finalCount"]
             puts taskID
