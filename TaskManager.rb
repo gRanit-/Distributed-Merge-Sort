@@ -6,6 +6,8 @@ require "SecureRandom"
 class TaskManager
 
     class Worker
+
+
         attr_accessor
             :currentArrayLength
             :currentTask
@@ -14,7 +16,7 @@ class TaskManager
             :arraysNumber
         def initialize(channel,id)
             @currentArrayLength=0
-            @arraysOnQueue
+            @arraysOnQueue=0
             @currentTask=0
             @id=id
             @queue=channel.queue(@id,:durable => true, :auto_delete => true)
@@ -26,9 +28,10 @@ class TaskManager
         :channel
         :channel2
         :conn
-        :replayToQueue
-        :mergeQueue
-        :newTaskQueue
+        :clientQueue
+        :taskInputQueue
+        :newTaskQueue #const
+        :newWorkerQueue #const
         :finalCount
         :mergeQueueName
         :replayToQueueName
@@ -36,7 +39,7 @@ class TaskManager
         :workerList
         :currentTaskQueue
         :taskID
-        :taskInputQueues
+        
         #:taskExchange
 
     def initialize
@@ -54,7 +57,8 @@ class TaskManager
         #@taskExchange=@channel.fanout("TaskExchange")
         @newTaskQueue=@channel2.queue("NewTaskQueue",:durable => true)
         @newWorkerQueue=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
-        @workerResponseQueue=@channel.queue("workerResponseQueue",:durable => true, :auto_delete => true)
+        @newTaskQueue.purge
+        @newWorkerQueue.purge
     end
 
     def binarySearch(value,workerList)
@@ -97,11 +101,11 @@ class TaskManager
             worker.currentTask=@currentTaskQueue.name
             worker.queue.publish("ArrayToMerge",:persistent=>true,
                 :headers=>{
-                    :taskID=>@currentTaskQueue.name,
+                    :taskID=>@taskID,
                     :finalCount=>@finalCount,
                     :array=>array  
                 },
-                :message_id=>@currentTaskQueue.name
+                :reply_to=>@currentTaskQueue.name
                 )
 
         end        
@@ -110,28 +114,27 @@ class TaskManager
     def start
 
         task_delivery_info, task_properties, task_payload=""
-        @newTaskQueue.subscribe(:block=>true,:exclusive => true,:ack=>true) do |task_delivery_info, task_properties, task_payload|
+        while true
+        
+        @newTaskQueue.subscribe(:exclusive => true,:ack=>true) do |task_delivery_info, task_properties, task_payload|
             puts task_payload
             @taskID=task_properties.headers["taskID"]
             @finalCount=task_properties.headers["finalCount"]
-            @currentTaskQueue=@channel.queue("CurrentTaskQueue",:durable => true, :auto_delete => true)
+            @currentTaskQueue=@channel.queue(SecureRandom.hex,:durable => true, :auto_delete => true)
             @taskInputQueue=@channel.queue(@taskID,:durable => true, :auto_delete => true)
-            @replayToQueue=@channel.queue(task_properties.reply_to,:durable => true, :auto_delete => true)
+            @clientQueue=@channel.queue(task_properties.reply_to,:durable => true, :auto_delete => true)
            
 
             @taskInputQueue.subscribe() do |delivery_info, properties, payload|
                 sendArray(properties.headers["array"])
-
             end
-
- 
 
         end
         
         @currentTaskQueue.subscribe(:block=>true) do |delivery_info, properties, payload|
             array=properties.headers["array"]
             if array.length==@finalCount
-                @replayToQueue.publish("Result",:properties=>{:array=>array})
+                @clientQueue.publish("Result",:properties=>{:array=>array})
                 @channel2.acknowledge(task_delivery_info.delivery_tag,false)
             else    
                 sendArray(array)
@@ -145,7 +148,7 @@ class TaskManager
             workerList0.push(worker)
             puts "New worker registered."
         end
-
+    end
     end
 end
 

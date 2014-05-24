@@ -5,24 +5,22 @@ class Client
     attr_accessor 
         :channel
         :conn
-        :replayToQueue
+        :taskID
+        :clientQueue
         :mergeQueue
-        :newTaskExchange
+        :taskInputQueue
         :newTaskQueue
         :finalCount
-        :mergeQueueName
-        :replayToQueueName
-
+        :clientID
     def initialize
+        @clientID=SecureRandom.hex
         while true do
             begin 
                 @conn = Bunny.new
                 @conn.start
                 @channel=@conn.create_channel
                 @newTaskQueue=@channel.queue("NewTaskQueue",:durable => true)
-
-                @mergeQueueName=SecureRandom.hex
-                @replayToQueueName=SecureRandom.hex
+                @clientQueue=@channel.queue(@clientID,:durable=>true,:auto_delete=>true)
                 break
             rescue Exception => e
                 puts "Something went terribly wrong! I couldn't connect, the exception is:"
@@ -70,31 +68,7 @@ class Client
     end        
 
     def start
-        while true do 
-            begin
-                
-                @mergeQueue=@channel.queue(@mergeQueueName,:durable => true,:auto_delete=>true)
-                @replyToQueue=@channel.queue(@replayToQueueName,:durable => true, :auto_delete => true)
 
-                puts "Succesfully Connected!"
-
-                @mergeQueue.purge()
-                @replyToQueue.purge()
-                break
-            rescue Exception=>e
-                puts "Something went terribly wrong! I couldn't connect, the exception is:"
-                print "=> "
-                print e
-                print " <=\n"
-                for i in 0..5 do
-                    print "Recconecting in "
-                    print (5-i).to_s
-                    print  " seconds...\n"
-                    sleep(1)
-                end    
-            end
-        end
-        
         while true do
 
             choice=0
@@ -109,6 +83,7 @@ class Client
 
                 choice=gets.chomp
                 if choice=='1'
+
                     puts "Enter FileName: "
                     fileName=gets.chomp
                     numbers=readArrayFromFile(fileName)
@@ -138,29 +113,30 @@ class Client
 
     end
 
-    def sendTask(array)           
-        @newTaskQueue.publish("NewTask",:persistent=>true,
-            :headers=>{
-            :taskID=>@mergeQueue.name,
-            :replyTo=>@replyToQueue.name,
-            :finalCount=>array.count
-        },:message_id=>@mergeQueue.name)
-
-        puts "Send taskID: "+@mergeQueue.name
+    def sendTask(array)
+        @taskID=SecureRandom.hex
+        @taskInputQueue=@channel.queue(@taskID,:durable=>true,:auto_delete=>true)
 
         finalCount=array.count
         for number in array
-            @mergeQueue.publish("MergeMessage",:persistent=>true,
+            @taskInputQueue.publish("MergeMessage",:persistent=>true,
             :headers=>{
-                    :taskID=>@mergeQueue.name,
-                    
+                    :taskID=>@taskID,
                     :array=>[number],
-                    :finalCount=>array.count},:reply_to=>@replyToQueue.name,) 
+                    :finalCount=>array.count},:reply_to=>@clientID,) 
         end
+
+        @newTaskQueue.publish("NewTask",:persistent=>true,
+            :headers=>{
+            :taskID=>@taskID,
+            :finalCount=>array.count
+        },:reply_to=>@clientID)
+
+        puts "Send task with taskID: "+@taskID
 
         puts "Awaiting reply..." 
 
-        @replyToQueue.subscribe(:block => true,:exclusive => true,:ack=>true) do |delivery_info, properties, payload|
+        @clientQueue.subscribe(:block => true,:exclusive => true,:ack=>true) do |delivery_info, properties, payload|
             array=properties.headers["array"]
             puts "Recieved response!"
             puts "Do you want me to output sorted array?"

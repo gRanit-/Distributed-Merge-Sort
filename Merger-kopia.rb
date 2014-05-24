@@ -30,7 +30,7 @@ class Merger
         
         @channel.prefetch(1)
         @channel3.prefetch(2)
-        @taskQueue=@channel.queue("",:durable => true, :auto_delete => true,:exclusive => true)
+        #@taskQueue=@channel.queue("",:durable => true, :auto_delete => true,:exclusive => true)
 
         @taskID=""
         @finalCount=""
@@ -50,11 +50,11 @@ class Merger
         
         #@replyToQueue=@channel2.queue(worker,:durable => true, :auto_delete => true)
         #    puts "Connected to replyQueue: "+customerID 
-        @currentTaskQueue=@channel3.queue("CurrentTaskQueue",:durable => true, :auto_delete => true)
-            puts "Connected to CurrentTaskQueue: "+taskID  
+        #@currentTaskQueue=@channel3.queue("CurrentTaskQueue",:durable => true, :auto_delete => true)
+        #    puts "Connected to CurrentTaskQueue: "+taskID  
         # currentTaskQueue=@currentTaskQueue
-            self.merge()
-            puts "Finished Task!"       
+            #self.merge()
+            puts "Finished Task!"
     end
 
    
@@ -62,7 +62,7 @@ class Merger
 
 
     def start
-        @taskQueue.subscribe(:block => true,:ack=>false,:exclusive => true) do |task_delivery_info, task_properties, task_payload|
+        '''@taskQueue.subscribe(:block => true,:ack=>false,:exclusive => true) do |task_delivery_info, task_properties, task_payload|
             
             @task_delivery_info, @task_properties, @task_payload=task_delivery_info, task_properties, task_payload
             puts task_payload
@@ -79,13 +79,12 @@ class Merger
             @currentTaskQueue=@channel3.queue(taskID,:durable => true)
             puts "Connected to currentTaskQueue: "+taskID  
 
-         
-            
             #currentTaskQueue=@currentTaskQueue
             self.merge()
             puts "Finished Task!"  
         end
-        puts "Out ouf taskQueue"
+        puts "Out ouf taskQueue"'''
+        self.merge()
     end
 
 
@@ -107,7 +106,7 @@ class Merger
         left=[]
         right=[]
 
-        @workerQueue.subscribe(:ack=>true) do |delivery_info, properties, payload|
+        @workerQueue.subscribe(:block=>true,:ack=>true) do |delivery_info, properties, payload|
             puts "Recieved array to sort" 
             array=properties.headers["array"]
             if left.empty?
@@ -117,7 +116,7 @@ class Merger
             end
             if not left.empty? and not right.empty?
                 array=mergeArrays(left,right)    
-                @currentTaskQueue.publish("NewArray",:headers=>{
+                @channel3.queue(properties.reply_to,:durable => true, :auto_delete => true).publish("New Merged Array",:headers=>{
                     :array=>array,
                     :finalCount=>properties.headers["finalCount"]
                 })
