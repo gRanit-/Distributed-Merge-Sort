@@ -1,12 +1,67 @@
 require "bunny"
+require "SecureRandom"
+
+class Merger
+    attr_accessor :conn,
+    :currentTaskQueue,
+    :replyToQueue,
+    :taskQueue,
+    :channel,
+    :channel2,
+    :channel3,
+    :newTaskExchane,
+    :taskID,
+    :finalCount,
+    :workerID,
+    :task_delivery_info,
+    :task_properties,
+    :task_payload,
+    :workerQueue,
+    :finishedTaskQueue
+
+    def initialize()
+        @conn = Bunny.new
+        @conn.start    
+        @channel  = @conn.create_channel
+        @channel2  = @conn.create_channel
+        @channel3  = @conn.create_channel
+        @channel4  = @conn.create_channel
+        @newTaskExchange=@channel.fanout("NewTask")
+
+        
+        @channel.prefetch(1)
+        @channel3.prefetch(2)
+
+
+        @taskID=""
+        @finalCount=""
+        @workerID=SecureRandom.hex
+    
+        @workerQueue=@channel3.queue(@workerID,:durable => true, :auto_delete => true)
+        
+        newWorker=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
+        newWorker.publish("Requesting signup, id: "+@workerID,:persistent=>true,:headers=>{
+        :workerID=>@workerID,
+        :test=>"test"})
+        
+        noMessage=true
+
+        puts "Awaiting Task..."
+
+
+    end
 
 
 
+    def start
+            
+        while true
+        self.merge()
+        end
+    end
 
 
-
-
-    def mergeSort(left, right)
+    def mergeArrays(left, right)
       result = []
       until left.empty? || right.empty?
         if left.first <= right.first
@@ -20,195 +75,74 @@ require "bunny"
 
 
 
-    def merge(mergeQueue,replyToQueue)
-    puts "merge def"
+    def merge()
         left=[]
         right=[]
-    #while true do
-     #   finish=false
-       
-        mergeQueue.subscribe(:block=>false,:ack=>true) do |delivery_info, properties, payload|
-            puts "mergeSub"
-            if left.empty?
-                left=properties.headers["array"]
+        while true
+
+        
+        while @workerQueue.message_count!=0     #Pobieranie tablic
+            delivery_info, properties, payload=@workerQueue.pop(:ack=>true)
+            if properties[:headers]["reject"]       #Komenda odrzucenia tablicy i oddania na kolejke
+                sleep(Random.rand(3)/5.0)
+                puts "REJECTING"
+                puts left.length.to_s
+                left.compact!
+
+                @channel3.queue(properties[:reply_to],:durable => true, :auto_delete => true).publish("New Merged Array",:headers=>{
+                    :array=>left,
+                    :finalCount=>properties[:headers]["finalCount"],
+                    :workerID=>@workerID
+                })
+
+                left=[]
+                right=[]
             else
-                right=properties.headers["array"]
-                puts properties.headers["array"].inspect
-            end
-    
-            if not left.empty?   
-                if  left.length ==properties.headers["finalCount"].to_i
-                    replyToQueue.publish("RESULT",:persistent=>true,
-                        :headers=>{
-                        :array=>left},:correlation_id=>taskID)
-                    channel.acknowledge(task_delivery_info.delivery_tag, false)
-                    channel3.acknowledge(delivery_info.delivery_tag, false)
-                   # finish=true
-                end
-            end
-    
-            if not right.empty?
-                if  right.length ==properties.headers["finalCount"].to_i
-                replyToQueue.publish("RESULT",:persistent=>true,
-                    :headers=>{
-                    :array=>right},:correlation_id=>taskID)
-                    puts "FINISHED"
-                    channel.acknowledge(task_delivery_info.delivery_tag, false)
-                    channel3.acknowledge(delivery_info.delivery_tag, false)
-                    finish=true
-                end
-           end
 
-           if not left.empty? and not right.empty? 
-               array=self.mergeSort(left,right)
-               channel3.acknowledge(delivery_info.delivery_tag, false)
-               puts array.length.to_s
-               left=[]
-               right=[]
-    
-              if array.length==properties.headers["finalCount"].to_i
-                    replyToQueue.publish("RESULT",:persistent=>true,
-                    :headers=>{
-                    :array=>array},:correlation_id=>taskID)
-                    puts "FINISHED"
-                    channel.acknowledge(task_delivery_info.delivery_tag, false)
-                    channel3.acknowledge(delivery_info.delivery_tag, false)
-                    finish=true
- 
-             else
-                 print "PUBLISHING MERGE"
-                 mergeQueue.publish("MergeMessage",:persistent=>true,
-                     :headers=>{
-                     :taskID=>MergeQueue.name,
-                     :replayTo=>replyToQueue.name,
-                     :array=>array,
-                     :finalCount=>finalCount})
-                 channel3.acknowledge(delivery_info.delivery_tag, false)
-             end
+            array=properties[:headers]["array"]
+            puts "Recieved array to sort " +array.length.to_s
+            array.compact!
+            puts array.inspect
+            if left.empty?
+                left=array
+            else
+                right=array
+            end
+            if not left.empty? and not right.empty?
+                leftn=left.length
+                rightn=right.length
+                array=mergeArrays(left,right)
+                array.compact!   
+                puts "Merged left: "+leftn.to_s+" with right: "+rightn.to_s
+
+                @channel3.queue(properties[:reply_to],:durable => true, :auto_delete => true).publish("New Merged Array",:headers=>{
+                    :array=>array,
+                    :finalCount=>properties[:headers]["finalCount"],
+                    :workerID=>@workerID,
+                    :reRouted=>false
+                })
+                @channel.queue(properties[:headers]["finishedQueue"],:durable => true, :auto_delete => true).publish("Finished",:headers=>{
+                    :workerID=>@workerID
+                })
+                puts "Sent it to TaskManager..."
+
+                left=[]
+                right=[]
+            elsif  left.empty? and  right.empty?
+                                @channel.queue(properties[:headers]["finishedQueue"],:durable => true, :auto_delete => true).publish("Finished",:headers=>{
+                    :workerID=>@workerID
+                })
+            end
+             @channel3.acknowledge(delivery_info.delivery_tag,false)
+            end
+
         end
-  # ...
     end
 
-    #break if finish
+    end  
 end
-
- 
-
    
+m=Merger.new
 
-
-conn = Bunny.new
-conn.start    
-channel  = conn.create_channel
-channel2  = conn.create_channel
-channel3  = conn.create_channel
-channel4  = conn.create_channel
-newTaskExchange=channel.fanout("NewTask")
-
-taskQueue=channel.queue("",:durable => true, :auto_delete => true,:exclusive => true)
-taskQueue.bind(newTaskExchange)
-channel.prefetch(1)
-channel3.prefetch(2)
-taskID=""
-finalCount=""
-customerID=(0...50).map { ('a'..'z').to_a[rand(26)] }.join
-    
-q=channel.queue(customerID,:durable => true, :auto_delete => true)
-        
-        
-newWorker=channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
-newWorker.publish("Requesting signup,id "+customerID,:persistent=>true,:headers=>{
-        :workerID=>customerID})
-        
-        noMessage=true
-puts "Awaiting Task"
-
-while noMessage do
-    q.subscribe() do |task_delivery_info, task_properties, task_payload|
-    customerID=task_properties.headers["replyTo"]
-    taskID=task_properties.headers["taskID"]
-    finalCount=task_properties.headers["finalCount"]
-    noMessage=false
-end
-        
-        
-replyToQueue=channel2.queue(customerID,:durable => true, :auto_delete => true)
-puts "Connected to replyQueue: "+customerID 
-mergeQueue=channel3.queue(taskID,:durable => true)
-puts "Connected to MergeQueue: "+taskID  
-        # mergeQueue=MergeQueue
-
-merge(mergeQueue,replyToQueue)         
-     
-
-    
-taskQueue.subscribe(:block => true,:ack=>true,:exclusive => true) do |task_delivery_info, task_properties, task_payload|
-    puts task_payload
-    customerID=task_properties.headers["replyTo"]
-    taskID=task_properties.headers["taskID"]
-    finalCount=task_properties.headers["finalCount"]
-    puts taskID
-
-
-      replyToQueue=channel2.queue(customerID,:durable => true, :auto_delete => true)
-            puts "Connected to replyQueue: "+customerID 
-            mergeQueue=channel3.queue(taskID,:durable => true, :auto_delete => true)
-            puts "Connected to MergeQueue: "+taskID  
-
-            st=" "
-            puts " [*] Waiting for logs. To exit press CTRL+C"
-           
-            merge(mergeQueue,replyToQueue)
-            puts "ENDED"
-        end
-    
-end
-
-'''
-while true do
-delivery_info1=" "
-delivery_tag1=" "
-delivery_info2=" "
-delivery_tag2=" "
-begin
-st=" "
-   delivery_info1, properties1, payload1, = MergeQueue.pop
-
-    if payload1!=nil 
-        left=payload1.split(" ").map {|i| i.to_i}
-        i+=1
-
-       delivery_info2, properties2, payload2 = MergeQueue.pop
-
-        if payload2!=nil 
-            right=payload2.split(" ").map {|i| i.to_i}
- 
-        else right=[]
-        end  
-            array=merge(left,right)
-
-            for number in array do
-                st+=number.to_s+" "
-            end 
-
-            puts st+"\n"+array.length.to_s+"\n"
-        #    
-        MergeQueue.publish(st,:persistent=>true)
-
-        #end
-    end
-
-    rescue Exception => e
-#print st
-      print e
-      wait(2)
-      channel.reject(delivery_info1.delivery_tag, true)
-      channel.reject(delivery_info2.delivery_tag, true)
-      channel.close
-      conn.close
-      break
- 
-    end
-
-end
-'''
+puts "Starting..."
+m.start
