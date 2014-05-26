@@ -77,7 +77,7 @@ class Client
             while choice!=1 and choice!=2 do
                 puts "\n---------------------------------------------------------------------------------"
                 puts "Press 1) Use file as an input"
-                puts "Press 2) Generate 10000 random numbers between 0 and 1000000 and write them to file"
+                puts "Press 2) Generate 256 random numbers between 0 and 1000000 and write them to file"
                 puts "---------------------------------------------------------------------------------"
                 puts "\nPlease choose 1 or 2 \n"
 
@@ -94,12 +94,13 @@ class Client
                     else next
                     end
                 elsif choice=='2'
-
-                    for i in 0..9999 do
-                        random_number=Random.rand(1000000)
+                    f=File.new("Generated_Numbers.txt",'w')
+                    f.close()
+                    for i in 0..255 do
+                        random_number=Random.rand(10000)
                         numbers.push(random_number)
                         File.open("Generated_Numbers.txt",'a'){|file| file.write(random_number)}
-                        if i<9999
+                        if i<255
                             File.open("Generated_Numbers.txt",'a'){|file| file.write(" ")}
                         end    
                     end
@@ -117,64 +118,77 @@ class Client
         @taskID=SecureRandom.hex
         @taskInputQueue=@channel.queue(@taskID,:durable=>true,:auto_delete=>true)
 
+        puts "Send task with taskID: "+@taskID
+        puts "Publishing task input..."
         finalCount=array.count
         for number in array
             @taskInputQueue.publish("MergeMessage",:persistent=>true,
             :headers=>{
                     :taskID=>@taskID,
                     :array=>[number],
-                    :finalCount=>array.count},:reply_to=>@clientID,) 
-        end
+                    :workerID=>0,
+                    :finalCount=>array.count,
+                    :reRouted=>false
 
-        @newTaskQueue.publish("NewTask",:persistent=>true,
+                    },
+
+                    :reply_to=>@clientID) 
+        end
+        puts "...published!"
+        @newTaskQueue.publish("NewTaskQueue",:persistent=>true,
             :headers=>{
             :taskID=>@taskID,
             :finalCount=>array.count
-        },:reply_to=>@clientID)
-
-        puts "Send task with taskID: "+@taskID
+        },
+        :reply_to=>@clientID)
 
         puts "Awaiting reply..." 
 
-        @clientQueue.subscribe(:block => true,:exclusive => true,:ack=>true) do |delivery_info, properties, payload|
-            array=properties.headers["array"]
-            puts "Recieved response!"
-            puts "Do you want me to output sorted array?"
+        while true
+            if @clientQueue.message_count!=0
+                delivey_info,properties,payload=@clientQueue.pop
+                array=properties[:headers]["array"]
+                puts "Recieved response!"
+                puts "Do you want me to output sorted array?"
             
-            choice=""
-
-            while choice!='y' or choice !='n'
-                puts "Please answer y/n"
-                choice=gets.chomp
-            end
-
-            if choice=="y"
-                puts array.inspect
-                puts "===================="
-                puts "Array length: " + array.length.to_s
-            end    
-            puts "Would you like to save the result to file?"
-            choice=""
-
-            while choice!='y' or choice !='n'
-                puts "Please answer y/n"
-                choice=gets.chomp
-            end
-
-            if choice=="y"
                 choice=""
-                
-                while choice==""
-                    puts "Please enter filename"
+
+                while choice!='y' and choice !='n'
+                   puts "Please answer y/n"
                     choice=gets.chomp
                 end
-                saveArrayToFile(array,choice)
-            end
-            
-            puts "Finishing task...."
-            puts "======================"        
 
-            @channel.acknowledge(delivey_info.delivery_tag,false)  
+                if choice=="y"
+                    puts array.inspect
+                    puts "===================="
+                    puts "Array length: " + array.length.to_s
+                end 
+
+
+                puts "Would you like to save the result to file?"
+                choice=""
+
+                while choice!='y' and choice !='n'
+                    puts "Please answer y/n"
+                    choice=gets.chomp
+                end
+
+                if choice=="y"
+                    choice=""
+                
+                    while choice==""
+                        puts "Please enter filename"
+                        choice=gets.chomp
+                    end
+                    saveArrayToFile(array,choice)
+                end
+            
+                puts "Finishing task...."
+                puts "======================"        
+                 break
+            end
+          
+           
        end      
    end
 end

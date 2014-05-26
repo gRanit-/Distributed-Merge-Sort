@@ -15,8 +15,9 @@ class Merger
     :workerID,
     :task_delivery_info,
     :task_properties,
-    :task_payload
-    :workerQueue
+    :task_payload,
+    :workerQueue,
+    :finishedTaskQueue
 
     def initialize()
         @conn = Bunny.new
@@ -41,7 +42,8 @@ class Merger
         
         newWorker=@channel.queue("NewWorkerQueue",:durable => true, :auto_delete => true)
         newWorker.publish("Requesting signup, id: "+@workerID,:persistent=>true,:headers=>{
-        :workerID=>@workerID})
+        :workerID=>@workerID,
+        :test=>"test"})
         
         noMessage=true
 
@@ -54,7 +56,7 @@ class Merger
         #    puts "Connected to CurrentTaskQueue: "+taskID  
         # currentTaskQueue=@currentTaskQueue
             #self.merge()
-            puts "Finished Task!"
+
     end
 
    
@@ -62,29 +64,10 @@ class Merger
 
 
     def start
-        '''@taskQueue.subscribe(:block => true,:ack=>false,:exclusive => true) do |task_delivery_info, task_properties, task_payload|
             
-            @task_delivery_info, @task_properties, @task_payload=task_delivery_info, task_properties, task_payload
-            puts task_payload
-            @customerID=task_properties.reply_to
-            @taskID=task_properties.headers["taskID"]
-            @finalCount=task_properties.headers["finalCount"]
-            puts taskID
-
-            @channel2  = @conn.create_channel
-            @channel3  = @conn.create_channel
-            #@channel3.prefetch(1)
-            #@replyToQueue=@channel2.queue(customerID,:durable => true, :auto_delete => true)
-            #puts "Connected to replyQueue: "+customerID 
-            @currentTaskQueue=@channel3.queue(taskID,:durable => true)
-            puts "Connected to currentTaskQueue: "+taskID  
-
-            #currentTaskQueue=@currentTaskQueue
-            self.merge()
-            puts "Finished Task!"  
-        end
-        puts "Out ouf taskQueue"'''
+        while true
         self.merge()
+        end
     end
 
 
@@ -105,27 +88,64 @@ class Merger
     def merge()
         left=[]
         right=[]
+        while true
 
-        @workerQueue.subscribe(:block=>true,:ack=>true) do |delivery_info, properties, payload|
-            puts "Recieved array to sort" 
-            array=properties.headers["array"]
+        
+        while @workerQueue.message_count!=0
+            delivery_info, properties, payload=@workerQueue.pop
+            if properties[:headers]["reject"]
+                sleep(Random.rand(3)/5.0)
+                puts "REJECTING"
+                puts left.length.to_s
+                left.compact!
+
+                @channel3.queue(properties[:reply_to],:durable => true, :auto_delete => true).publish("New Merged Array",:headers=>{
+                    :array=>left,
+                    :finalCount=>properties[:headers]["finalCount"],
+                    :workerID=>@workerID
+                })
+
+                left=[]
+                right=[]
+            else
+
+            array=properties[:headers]["array"]
+            puts "Recieved array to sort " +array.length.to_s
+            array.compact!
+            puts array.inspect
             if left.empty?
                 left=array
             else
                 right=array
             end
             if not left.empty? and not right.empty?
-                array=mergeArrays(left,right)    
-                @channel3.queue(properties.reply_to,:durable => true, :auto_delete => true).publish("New Merged Array",:headers=>{
+                leftn=left.length
+                rightn=right.length
+                array=mergeArrays(left,right)
+                array.compact!   
+                puts "Merged left: "+leftn.to_s+" with right: "+rightn.to_s
+
+                @channel3.queue(properties[:reply_to],:durable => true, :auto_delete => true).publish("New Merged Array",:headers=>{
                     :array=>array,
-                    :finalCount=>properties.headers["finalCount"]
+                    :finalCount=>properties[:headers]["finalCount"],
+                    :workerID=>@workerID,
+                    :reRouted=>false
                 })
+                @channel.queue(properties[:headers]["finishedQueue"],:durable => true, :auto_delete => true).publish("Finished",:headers=>{
+                    :workerID=>@workerID
+                })
+                puts "Sent it to TaskManager..."
+
                 left=[]
                 right=[]
-                channel3.acknowledge(delivery_info.delivery_tag, false) 
+            elsif  left.empty? and  right.empty?
+                                @channel.queue(properties[:headers]["finishedQueue"],:durable => true, :auto_delete => true).publish("Finished",:headers=>{
+                    :workerID=>@workerID
+                })
             end     
-            
+            end
         end
+    end
 
     end  
 end
